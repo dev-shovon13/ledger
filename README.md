@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ledger: expenses and loans
 
-## Getting Started
-
-First, run the development server:
+A personal tracker for daily expenses, advance payments and loans. There is no backend yet: data is saved in the browser's localStorage.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev        # http://localhost:3000
+npm test           # unit tests for lib/calculations (vitest)
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Deploying (Vercel)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+No `vercel.json` or environment variables are needed: Vercel detects Next.js and runs `next build`. Every route is a static page, and all data stays in the user's browser.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Node:** pinned to `22.x` in `package.json` (`engines`). Next 16 needs Node 20.9 or newer.
+- **Deploy:** push to a Git repository connected to Vercel, or run `npx vercel` from this folder.
+- **Data:** each browser keeps its own data, so data on your laptop won't appear on your phone. Use Settings → Export / Import JSON to move it.
 
-## Learn More
+## Architecture
 
-To learn more about Next.js, take a look at the following resources:
+| Layer | Where | Notes |
+| --- | --- | --- |
+| Types | `lib/types.ts` | `Expense`, `Loan`, `LoanTransaction`, `AppData` |
+| Selectors | `lib/calculations.ts` | Pure functions that compute every derived number (day and month totals, loan opening and closing balances, the month summary, quick-add parsing). None of these values are stored. |
+| Money | `lib/money.ts` | Amounts are stored in major units, but all arithmetic runs on integer minor units, so sums don't pick up floating-point drift |
+| Repositories | `lib/repositories/` | `ExpenseRepository`, `LoanRepository` and `BackupRepository` interfaces, with a localStorage implementation |
+| Migrations | `lib/migrations.ts` | Versioned data shape (`DATA_VERSION`), used both for storage and for imported backups |
+| State | `lib/store.ts` | A Zustand data store that calls the repositories. UI preferences (currency, sort order, added dates) use the persist middleware. |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Moving to a backend
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Implement `Repositories` from `lib/repositories/types.ts`, for example as an `ApiRepositories` class that uses `fetch`.
+2. Return it from `getRepositories()` in `lib/repositories/index.ts`.
 
-## Deploy on Vercel
+The UI and the store only call the interfaces, so nothing else has to change.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Languages (English / বাংলা)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Where text lives:** all UI text is in `lib/i18n/messages/en.ts` and `bn.ts`. The Bangla file must match the English shape exactly (TypeScript checks this), so a missing translation fails the build.
+- **Switching language:** the choice is saved with the other local preferences and never touches the URL. English is the default.
+- **Formatting:** dates, months and numbers use `bn-BD` in Bangla mode, so they appear in Bangla digits (৳১,২৫০). Typed input accepts both digit styles, so `বাস ২০` works in quick add.
+- **Fonts:** Bangla text uses Noto Sans Bengali, as a fallback after Geist. The PDF embeds `public/fonts/LedgerPdf-*.ttf`, which merges Noto Sans and Noto Sans Bengali into one file because jsPDF can't switch fonts mid-text. Rebuild it with `python3 scripts/build-pdf-fonts.py` (needs `pip install fonttools`).
+- **PDF:** the export follows the app language. Text with Bangla vowel signs or joined letters is drawn by the browser so it renders correctly (`lib/pdf/complex-text.ts`).
+
+## Behaviour notes
+
+- **Advances:** an expense with `advanceForMonth` counts toward that month's total. In the month it was paid, it appears under "Advances paid for future months" and is left out of that month's total.
+- **Loans:** a loan's original amount is its first `principal` transaction. Each month's opening balance is computed from the history before that month, so one month's closing balance always equals the next month's opening balance. A loan is marked settled on the date its balance reaches 0. It reopens automatically if the balance becomes positive again, and can also be reopened by hand.
+- **People:** the Loans page groups loans by person (`buildPeople` in `lib/calculations.ts`). Names are matched ignoring case and spaces, and if you both borrowed from and lent to someone, the two are netted.
+- **Loan repayments:** a repayment on money you borrowed can also be counted as an expense in that month's spending.
+- **Categories:** categories are matched ignoring case and surrounding spaces. "By category" in the breakdown, and the chips on phones, filter the month's list. The filter clears when you change month.
+- **Today card:** the current month always shows a card for today, ready for quick entry.
+
+## Theming
+
+Colours are OKLCH tokens in `app/globals.css`. Both themes are tuned separately, with neutrals tinted towards the brand teal. All text pairs meet WCAG AA contrast (4.5:1 or better). Cards get their depth from `--shadow-card`.
